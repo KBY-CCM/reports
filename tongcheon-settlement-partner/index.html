@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>통닭천사의 깔깔튜브 정산 내역서</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: spreadsheet-style summary on top; each month row expands in place to its full ledger. Break-even calculator at the bottom. */
+:root{
+  --bg:#f8f5f6; --paper:#ffffff; --fg:#1d1f1b; --muted:#6b6f66; --line:#dcdad2; --row:#fcf9fa;
+  --ink:#a3335f; --ink-soft:#fbe5ee; --warn:#b4541b; --warn-soft:#fbeadc; --neg:#a3362c;
+  --sans:'IBM Plex Sans KR',-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#151714; --paper:#1d201c; --fg:#ebeae4; --muted:#9a9e95; --line:#33382f; --row:#20241f;
+  --ink:#ec9cbc; --ink-soft:#3b2230; --warn:#e3904f; --warn-soft:#3b2a1c; --neg:#e07a6e; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#151714; --paper:#1d201c; --fg:#ebeae4; --muted:#9a9e95; --line:#33382f; --row:#20241f;
+  --ink:#ec9cbc; --ink-soft:#3b2230; --warn:#e3904f; --warn-soft:#3b2a1c; --neg:#e07a6e; color-scheme:dark }
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 56px;
+  font-variant-numeric:tabular-nums}
+.wrap{max-width:960px;margin:0 auto;display:grid;gap:28px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 24px;border-bottom:2px solid var(--fg);padding-bottom:14px}
+h1{font-size:22px;font-weight:700;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:15px;font-weight:700;margin:0 0 10px}
+.eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 4px}
+.meta{color:var(--muted);font-size:12.5px;text-align:right}
+.meta b{color:var(--fg);font-weight:600}
+.notes{color:var(--muted);font-size:12.5px;display:grid;gap:3px;margin:10px 0 0;padding:0;list-style:none}
+.notes li::before{content:"※ "}
+.tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;background:var(--warn-soft);color:var(--warn);font-weight:600;margin-left:6px;vertical-align:1px}
+.neg{color:var(--neg)}
+.pos{color:var(--ink)}
+
+/* ---- summary grid (spreadsheet look) ---- */
+.scroll{overflow-x:auto;border:1px solid var(--line);background:var(--paper)}
+.grid{min-width:700px}
+.r{display:grid;grid-template-columns:72px repeat(6,1fr);align-items:center}
+.r > *{padding:9px 12px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line);min-width:0}
+.r > *:first-child{text-align:left;font-weight:600}
+.r.head > *{font-size:11.5px;font-weight:600;color:var(--muted);background:var(--row)}
+.r .kb,.r .tc{background:var(--ink-soft)}
+.r .ref{color:var(--muted)}
+.r.total > *{font-weight:700;border-top:2px solid var(--fg);border-bottom:0}
+.r.total .kb,.r.total .tc{color:var(--ink)}
+details{border-bottom:0}
+summary{list-style:none;cursor:pointer}
+summary::-webkit-details-marker{display:none}
+summary .r > *:first-child::before{content:"▸";display:inline-block;width:14px;color:var(--muted);transition:transform .15s}
+details[open] summary .r > *:first-child::before{transform:rotate(90deg)}
+summary:hover .r > *{background:var(--row)}
+summary:hover .r .kb,summary:hover .r .tc{background:var(--ink-soft)}
+summary:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+@media (prefers-reduced-motion:reduce){summary .r > *:first-child::before{transition:none}}
+
+/* ---- expanded ledger: one table, columns locked to the summary grid ---- */
+.detail{background:var(--row);border-bottom:1px solid var(--line);padding:6px 0 14px}
+.ledger{width:100%;border-collapse:collapse;table-layout:fixed}
+.ledger col.c1{width:92px}.ledger col.c3{width:170px}.ledger col.c4{width:190px}
+.ledger td,.ledger th{padding:7px 12px;vertical-align:middle;border-bottom:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ledger th{text-align:left;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;padding-top:14px;border-bottom:1px solid var(--fg)}
+.ledger td.cat{color:var(--muted);font-size:12px}
+.ledger td.amt{text-align:right}
+.ledger td.memo{color:var(--muted);font-size:12px;text-align:right}
+.ledger tr.sub td{font-weight:600;background:var(--paper)}
+.ledger tr.key td{font-weight:700;background:var(--ink-soft)}
+.ledger tr.key td.amt{color:var(--ink)}
+.ledger tr.final td{font-weight:700;font-size:15px;border-top:2px solid var(--fg);border-bottom:0;background:var(--paper)}
+
+/* ---- hero & price card ---- */
+.be{background:var(--paper);border:1px solid var(--line);padding:20px 22px;display:grid;gap:16px}
+.be p{margin:0;color:var(--muted);font-size:13px;max-width:62ch}
+.inputs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.inputs label{display:grid;gap:4px;font-size:12px;color:var(--muted);font-weight:600}
+.inputs input{font:inherit;font-size:14px;padding:7px 10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:4px;width:100%;text-align:right;font-variant-numeric:tabular-nums}
+.inputs input:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+.inputs small{font-weight:400;color:var(--muted)}
+.bet{width:100%;border-collapse:collapse}
+.bet th,.bet td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+.bet th{font-size:11.5px;color:var(--muted);font-weight:600}
+.bet th:first-child,.bet td:first-child{text-align:left}
+.bet td.ok{background:var(--ink-soft);color:var(--ink);font-weight:600}
+.bet td.bad{color:var(--neg)}
+.answer{font-size:15px;font-weight:700;padding:12px 14px;background:var(--ink-soft);color:var(--ink)}
+.answer small{display:block;font-weight:400;font-size:12.5px;color:var(--muted);margin-top:2px}
+@media (max-width:640px){.detail{grid-template-columns:1fr}.inputs{grid-template-columns:1fr}.meta{text-align:left}}
+</style>
+<style>
+#gate{position:fixed;inset:0;display:grid;place-items:center;background:var(--bg);z-index:50}
+#gate form{display:grid;gap:10px;width:min(320px,90vw);background:var(--paper);border:1px solid var(--line);padding:24px}
+#gate h1{font-size:15px;margin:0}
+#gate p{margin:0;font-size:12.5px;color:var(--muted)}
+#gate input{font:inherit;padding:9px 12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:4px}
+#gate button{font:inherit;font-weight:600;padding:9px;border:0;background:var(--ink);color:var(--paper);border-radius:4px;cursor:pointer}
+#gate .err{color:var(--neg);min-height:1.2em}
+</style>
+</head>
+<body style="margin:0;font-size:14px">
+<div id="gate"><form id="gf"><h1>통닭천사의 깔깔튜브 정산 내역서</h1><p>비밀번호를 입력하세요</p><input id="pw" type="password" autocomplete="current-password" autofocus><button type="submit">열기</button><p class="err" id="err"></p></form></div>
+<div id="content"></div>
+<script>
+const ENC={salt:"EZ17BCBalv79RRjzIw7Ouw==",iv:"c/RMb24/0MRzAW2V",ct:"UU1a4KP0CRAKPDLnZPxio1DQTMQVv2Xsv8JM+B+tgGFmfLhK0drOI6skySGarQNdVhVGZHHwvauk2ZF2T50MO2kugIzUGien4zJv8f/HOGTI5guoSG2Kr2X7UHzteyqJ1/TPau4Ywyth9e1m/hGGg4OTpdleU1CnrSGQ7A4zoR8kn9kbk0AiiuS7bEMUBzSqRThqcRpbTlyunuOpytZyX6NCVu51tTqtef5stwEenCctI7DSO04Qi1mUZ7glFhZ1wyiRnReYOsfYNv81D/hDPSz/dd70/0/43a8ICAobC3EgsAd72A+YFDKjvzaKs6VuS0c/dupDLgDUUfv0iTBtprHmjEqilgLnQol6Pd4iaT/yoXfaVCva4ONM+ApF3lP0+GIptMVSdXqdk8IfEmyAl9p+tz181Gu6JwmxUk1wxzN3lTUsshGh7AbvUgJi1vsKtA/8K5+lWX9i19DubrDbUmTnvxnSZ/jKaB1TmQFvoV7oqV+7ivI/ckk2xAeRbK85sVujJHHUMqrD3FIRuERDoYaCJtwSBIYl744LhoWd1MkHQTa2WPxGi5hmUgASkSa7itW3dL42YucsjtR+Q0O0FyH3b1tr6YbOmv5hiM1Tf/NT9ipW8VokGNnTZ0y5CLXyceB2oVOPibM9gVV7JJg8eF2bAJKGGHwAZU7vcwI1XXjGGZy9Zm2RcROhKM5gLcBkjO0d2W9TfrVpNMUA4u8yTwze7Y6n3uW3XW4GDDyavLbPS6e96fLMfMSnHFgvgdhk0hFTshqN0kIGF5WXpbeoRx56nXvyuHwNVWhUCzUsA8FycbaOqV632qxg6ODm1CmkQiTRj5Xm5KHOAFeUcRf2ctySHtXH+xuAAmbE8YylH9YwAiNFG+XkqGH2VD2VW6AoGO5l/gf2sSb3l2QePjjqMnAuDi8EC/m79ZxsOAuSS45cpQRgd95ToG8XUr/m/CztQNqwcdFuixKYOj6kW8ZCSq5EuABwAwIbGWSw6+E5QnqXyrbmdcLc7ejeOTdXST/ANmHesEI1stXXgGygRHFZjJo6FdtqHPukl7+7wyxrYv0iKzPpY0pPvzdWZd43sR7xHzoe7AkFAUPnV0J5hAclOHU/gaS7jWvFUHcomR/4S9RqMzz6epAaPwr/5Rk+nVS63Cw8z4Jo8SceI7wFCvgLsiF4xM4NxDI2Awt/US1klNWRitboNPvmHjA2t1oKwNWiXM5e7ofntCdCy32gjk2CgE7jDvw/BqxS3nm9eCBo1VcKvXuQvMV+rEL9IzXt454dJAwiz4wZm2Kt7iPOqdDRGYTJMLTZFrbsvEebs05NURvzWL6MQsYyiXW5z65SwxQfXpXyL0WpU+ULDDR0fOGdTfKI4jNEjKiXQ0NKxUtC+nCH67Dh++vUEE5lP6Dza0QmoyRGkltEFxSo0JeOpi//36dBAZSfPeSrdjxTLQCKamjsR2fXquKMApdCqpsVloYNe+U2kjIusjCpGp2RGBTREqW1"};
+const u8=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function open(pw){
+  const km=await crypto.subtle.importKey("raw",new TextEncoder().encode(pw),"PBKDF2",false,["deriveKey"]);
+  const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt:u8(ENC.salt),iterations:200000,hash:"SHA-256"},km,{name:"AES-GCM",length:256},false,["decrypt"]);
+  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:u8(ENC.iv)},key,u8(ENC.ct));
+  const html=new TextDecoder().decode(pt);
+  const c=document.getElementById("content"); c.innerHTML=html;
+  for(const s of c.querySelectorAll("script")){const n=document.createElement("script");n.textContent=s.textContent;s.replaceWith(n);}
+  document.getElementById("gate").remove();
+  try{sessionStorage.setItem("tcp_pw",pw)}catch(e){}
+}
+document.getElementById("gf").addEventListener("submit",async e=>{e.preventDefault();
+  try{await open(document.getElementById("pw").value)}catch(err){document.getElementById("err").textContent="비밀번호가 맞지 않아요";}
+});
+try{const s=sessionStorage.getItem("tcp_pw"); if(s) open(s).catch(()=>{});}catch(e){}
+</script>
+</body>
+</html>
