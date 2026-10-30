@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v15 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v16 (2026-10-30)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v15';
+const VERSION = 'v16';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -41,6 +41,7 @@ const COLLECT_HEADERS = ['월', '출처', '일자', '원문 제목', '추출 게
 const PEOPLE_HEADERS = ['이름(RAW 표기)', '분류', '배수(자동)', '게스트여부', '유튜브 핸들\n(@제외)', '별칭/캘린더 표기\n(쉼표 구분)', '동기화 시각'];
 const NEWP_HEADERS = ['월', '이름', '분류', '필요번호', '본명/예금주', '은행', '계좌번호', '게스트여부', '촬영일', '출연료(계약)', '정산명의', '본명', '계약서파일', '확인필요', '인물마스터 등록(자동)'];
 const MISSING = '모두싸인에서 확인';
+const NOCONTRACT = '계약서 없음';
 const OUT_HEADERS = ['대분류', '분류', '이름', '구분', '시기', '비용', '추가작업(필요시)', '최종금액(지급액)', '비고', '출처 탭', '신규여부'];
 const OUT_NEWP_HEADERS = ['▶ 통합문서 인물정보에 붙일 행', '이름', '분류', '필요번호', '본명(필요시)', '은행', '계좌번호', '게스트여부-3개월이후삭제'];
 
@@ -687,6 +688,7 @@ function buildOutput(ym) {
       if (!amt && ZERO_BASIS.indexOf(r[k.BASIS - 1]) < 0) warn.push(tab + ' ' + (i + 2) + '행 (' + name + '): 금액 없음');
       if (!p && !np) warn.push(tab + ' ' + (i + 2) + '행 (' + name + '): 인물마스터·신규인물정보 둘 다 없음 → 계약서/계좌 확인 필요');
       if (!p && np) { toAdd[name] = np; if (np.missing) warn.push(name + ': 계약서 추출본에 빈 항목(' + np.missing + ') → 모두싸인에서 확인'); }
+      if (!p && !np) toAdd[name] = { type: String(r[k.TYPE - 1] || ''), num: NOCONTRACT, payee: NOCONTRACT, bank: NOCONTRACT, acct: NOCONTRACT };
       if (amt === 0) return;
       rows.push(['제작인건비', '출연료', name, type, period, -amt, mult, -Math.round(amt * mult), note, tab, flag]);
     });
@@ -702,7 +704,8 @@ function buildOutput(ym) {
   out.getRange(1, c0, 1, OUT_NEWP_HEADERS.length).setValues([OUT_NEWP_HEADERS]).setBackground('#7c2d12').setFontColor('#fff').setFontWeight('bold');
   const addRows = Object.keys(toAdd).map(n => { const q = toAdd[n]; return ['', n, q.type, q.num, q.payee, q.bank, q.acct, '게스트']; });
   if (addRows.length) out.getRange(2, c0, addRows.length, OUT_NEWP_HEADERS.length).setValues(addRows);
-  out.setConditionalFormatRules([SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(MISSING).setFontColor('#dc2626').setBold(true).setRanges([out.getRange(2, c0, MAX_ROWS, OUT_NEWP_HEADERS.length)]).build()]);
+  const rng = out.getRange(2, c0, MAX_ROWS, OUT_NEWP_HEADERS.length);
+  out.setConditionalFormatRules([MISSING, NOCONTRACT].map(t => SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(t).setFontColor('#dc2626').setBold(true).setRanges([rng]).build()));
   const total = rows.reduce((s, r) => s + r[7], 0);
   const summary = ym + ' 취합: ' + rows.length + '행, 지급 합계 ' + Math.abs(total).toLocaleString() + '원'
     + (addRows.length ? '\n인물정보 추가 필요: ' + addRows.length + '명 (취합 탭 오른쪽 블록 복사)' : '')
