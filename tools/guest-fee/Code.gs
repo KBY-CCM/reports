@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v16 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v17 (2026-10-30)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v16';
+const VERSION = 'v17';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -678,18 +678,18 @@ function buildOutput(ym) {
       const name = String(r[k.NAME - 1] || '').trim();
       const amt = Number(r[k.AMT - 1]) || 0;
       const note = String(r[k.NOTE - 1] || '').trim() || (String(r[k.CONTENT - 1] || '').trim() + (r[k.DATE - 1] ? ' (' + fmt(r[k.DATE - 1]) + ')' : ''));
+      if (!r[k.BASIS - 1]) warn.push(tab + ' ' + (i + 2) + '행 (' + name + '): 단가기준 없음');
+      if (!amt && ZERO_BASIS.indexOf(r[k.BASIS - 1]) < 0) warn.push(tab + ' ' + (i + 2) + '행 (' + name + '): 금액 없음');
+      if (amt === 0) return; // 0원(거절·인바운드·광고주지불·미입력)은 취합 어디에도 안 넣음
       const p = ppl[name];
       const np = p ? null : findNewPerson(name, newp);
       const type = p ? p.type : (np ? np.type : '');
       const mult = type === '세금계산서' ? 1.1 : type === '삼쩜삼' ? 0.967 : 1;
       const flag = p ? '' : np ? '신규(계약서)' : '신규(정보없음)';
       if (!name) warn.push(tab + ' ' + (i + 2) + '행: 게스트명 없음');
-      if (!r[k.BASIS - 1]) warn.push(tab + ' ' + (i + 2) + '행 (' + name + '): 단가기준 없음');
-      if (!amt && ZERO_BASIS.indexOf(r[k.BASIS - 1]) < 0) warn.push(tab + ' ' + (i + 2) + '행 (' + name + '): 금액 없음');
       if (!p && !np) warn.push(tab + ' ' + (i + 2) + '행 (' + name + '): 인물마스터·신규인물정보 둘 다 없음 → 계약서/계좌 확인 필요');
       if (!p && np) { toAdd[name] = np; if (np.missing) warn.push(name + ': 계약서 추출본에 빈 항목(' + np.missing + ') → 모두싸인에서 확인'); }
       if (!p && !np) toAdd[name] = { type: String(r[k.TYPE - 1] || ''), num: NOCONTRACT, payee: NOCONTRACT, bank: NOCONTRACT, acct: NOCONTRACT };
-      if (amt === 0) return;
       rows.push(['제작인건비', '출연료', name, type, period, -amt, mult, -Math.round(amt * mult), note, tab, flag]);
     });
   });
