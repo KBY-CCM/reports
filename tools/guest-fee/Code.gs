@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v14 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v15 (2026-10-30)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v14';
+const VERSION = 'v15';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -87,6 +87,7 @@ function onOpen() {
     .addItem('내 캘린더 목록 보기', 'listCalendars')
     .addItem('월간 자동 트리거 설치', 'installTriggers')
     .addItem('최초 설정 (setup)', 'setup')
+    .addItem('이 파일의 입력 탭 → 팀 파일로 이사 (1회)', 'migrateTeamTabs')
     .addItem('팀 탭 전부 비우기 (테스트용)', 'clearTeamTabs')
     .addToUi();
 }
@@ -598,6 +599,31 @@ function fetchUploads(handle, start, end) {
 function isoSeconds(iso) {
   const m = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(iso || '');
   return m ? (Number(m[1] || 0) * 3600 + Number(m[2] || 0) * 60 + Number(m[3] || 0)) : 0;
+}
+
+// ─────────────────────────── 팀 탭 이사 (이 파일 → 팀 파일, 1회) ───────────────────────────
+function migrateTeamTabs() {
+  const ui = SpreadsheetApp.getUi();
+  const ts = teamSS();
+  if (ts.getId() === ss().getId()) { ui.alert('설정 탭 TEAM_SS_ID 가 비어 있어요. 새 팀 파일 ID를 먼저 넣고 setup 하세요.'); return; }
+  let moved = 0;
+  TEAM_TABS.forEach(tab => {
+    const src = ss().getSheetByName(tab); if (!src || src.getLastRow() < 2) return;
+    const dst = ts.getSheetByName(tab); if (!dst) return;
+    const ks = cols(src), kd = cols(dst);
+    const v = src.getRange(2, 1, src.getLastRow() - 1, src.getLastColumn()).getValues().filter(r => r[ks.NAME - 1]);
+    if (!v.length) return;
+    const nCol = Math.max(dst.getLastColumn(), TEAM_HEADERS.length);
+    const rows = v.map(r => { const o = new Array(nCol).fill(''); Object.keys(HEADER_KEYS).forEach(key => { if (ks[key] && kd[key]) o[kd[key] - 1] = r[ks[key] - 1]; }); o[kd.YM - 1] = ymCell(r[ks.YM - 1]); return o; });
+    const vals = dst.getRange(2, kd.YM, MAX_ROWS, 1).getValues();
+    let r0 = 2; for (let i = vals.length - 1; i >= 0; i--) { if (vals[i][0] !== '') { r0 = i + 3; break; } }
+    dst.getRange(r0, kd.YM, rows.length, 1).setNumberFormat('@');
+    dst.getRange(r0, 1, rows.length, nCol).setValues(rows);
+    applyRowFormulas(dst, r0, rows.length);
+    moved += rows.length;
+    src.setName(tab + '_백업'); src.hideSheet();
+  });
+  ui.alert(moved + '행을 팀 파일로 옮겼어요. 이 파일의 원래 입력 탭은 "_백업"으로 이름 바꿔 숨겨뒀어요 (확인 후 지워도 됨).');
 }
 
 // ─────────────────────────── 월 마감 (팀 탭 → 아카이브) ───────────────────────────
