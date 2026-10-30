@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v12 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v13 (2026-10-30)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v12';
+const VERSION = 'v13';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -47,6 +47,7 @@ const OUT_NEWP_HEADERS = ['▶ 통합문서 인물정보에 붙일 행', '이름
 const DEFAULT_SETTINGS = [
   ['XLSX_FILE_ID', '14ypyaW04Go3V-ev0ehlhr-bBXL_HBA2f', '★통합 문서1.xlsx 드라이브 파일 ID (인물정보 동기화용)'],
   ['XLSX_PEOPLE_SHEET', '인물정보', '통합문서 안의 인물정보 시트 이름'],
+  ['TEAM_SS_ID', '', '팀 입력용 별도 스프레드시트 ID (비우면 이 파일 안에 팀 탭 생성). 팀원에겐 그 파일만 공유'],
   ['NEW_PEOPLE_FOLDER_ID', '15IiDgt0rGHzpIAScHF0j31wO9sy3kl-f', '계약서 추출 CSV(신규인물정보_YYYY-MM.csv)가 놓이는 드라이브 폴더 ID'],
   ['CAL_침착맨 생방 일정', '입력_침투부', '캘린더 이름 → 배정 탭 (이름은 메뉴 > 내 캘린더 목록 보기 에서 복사)'],
   ['CAL_NEW채널제작일정', '입력_깔깔튜브', '캘린더 이름 → 배정 탭'],
@@ -96,11 +97,21 @@ function getSettings() {
   return out;
 }
 function ss() { return SpreadsheetApp.getActiveSpreadsheet(); }
+/** 팀 입력 탭이 있는 스프레드시트 (설정 TEAM_SS_ID 가 있으면 그 파일, 없으면 이 파일) */
+let _teamSS = null;
+function teamSS() {
+  if (_teamSS) return _teamSS;
+  const id = (getSettings().TEAM_SS_ID || '').trim();
+  _teamSS = id ? SpreadsheetApp.openById(id) : ss();
+  return _teamSS;
+}
+function getOrCreateIn(book, name) { return book.getSheetByName(name) || book.insertSheet(name); }
 
 // ─────────────────────────── 최초 설정 ───────────────────────────
 function setup() {
   const s = ss();
-  const guide = getOrCreate('안내');
+  const ts = teamSS();
+  const guide = getOrCreateIn(ts, '안내');
   guide.clear(); guide.setColumnWidth(1, 900);
   const lines = [
     ['출연료 월정산 입력 시트 — 사용 안내'], [''],
@@ -136,11 +147,18 @@ function setup() {
   cfg.setColumnWidth(1, 220); cfg.setColumnWidth(2, 360); cfg.setColumnWidth(3, 520);
   styleHeader(cfg, 3);
 
-  const ppl = getOrCreate('인물마스터');
-  ppl.getRange(1, 1, 1, PEOPLE_HEADERS.length).setValues([PEOPLE_HEADERS]); styleHeader(ppl, PEOPLE_HEADERS.length);
-  ppl.getRange(2, 3, 500, 1).setFormula('=IF(B2="","",IF(B2="세금계산서",1.1,IF(B2="삼쩜삼",0.967,1)))');
-  ppl.setColumnWidth(1, 170); ppl.setColumnWidth(5, 160); ppl.setColumnWidth(6, 260);
-  s.setNamedRange('PEOPLE_NAMES', ppl.getRange('A2:A500'));
+  const pplM = getOrCreate('인물마스터');
+  pplM.getRange(1, 1, 1, PEOPLE_HEADERS.length).setValues([PEOPLE_HEADERS]); styleHeader(pplM, PEOPLE_HEADERS.length);
+  pplM.getRange(2, 3, 500, 1).setFormula('=IF(B2="","",IF(B2="세금계산서",1.1,IF(B2="삼쩜삼",0.967,1)))');
+  pplM.setColumnWidth(1, 170); pplM.setColumnWidth(5, 160); pplM.setColumnWidth(6, 260);
+  s.setNamedRange('PEOPLE_NAMES', pplM.getRange('A2:A500'));
+  // 팀 파일에도 인물마스터(이름·분류만) 미러 — 드롭다운/수식용
+  const ppl = ts.getId() === s.getId() ? pplM : getOrCreateIn(ts, '인물마스터');
+  if (ppl !== pplM) {
+    ppl.getRange(1, 1, 1, 2).setValues([['이름(RAW 표기)', '분류']]); styleHeader(ppl, 2); ppl.setColumnWidth(1, 170);
+    ts.setNamedRange('PEOPLE_NAMES', ppl.getRange('A2:A500'));
+    mirrorPeopleToTeam();
+  }
 
   const col = getOrCreate('자동수집');
   col.getRange(1, 1, 1, COLLECT_HEADERS.length).setValues([COLLECT_HEADERS]); styleHeader(col, COLLECT_HEADERS.length); col.setColumnWidth(4, 360);
@@ -152,7 +170,7 @@ function setup() {
   out.getRange(1, 1, 1, OUT_HEADERS.length).setValues([OUT_HEADERS]); styleHeader(out, OUT_HEADERS.length); out.setColumnWidth(9, 260);
 
   TEAM_TABS.forEach(name => {
-    const sh = getOrCreate(name);
+    const sh = getOrCreateIn(ts, name);
     const hasHeader = String(sh.getRange(1, 1).getValue()).trim() !== '';
     if (!hasHeader) {
       sh.getRange(1, 1, 1, TEAM_HEADERS.length).setValues([TEAM_HEADERS]);
@@ -185,10 +203,10 @@ function setup() {
     p.setUnprotectedRanges(['NAME', 'CHK', 'BASIS', 'UNIT', 'NOTE', 'MEMO'].map(c => sh.getRange(2, k[c], MAX_ROWS, 1)));
   });
   ['인물마스터', '자동수집', '취합', '설정', '신규인물정보'].forEach(n => { const sh = s.getSheetByName(n); sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove()); sh.protect().setDescription('운영 전용').setWarningOnly(true); });
-  const def = s.getSheetByName('시트1') || s.getSheetByName('Sheet1');
-  if (def && s.getSheets().length > 1) s.deleteSheet(def);
-  s.setActiveSheet(guide);
-  SpreadsheetApp.getUi().alert('설정 완료! 다음: 메뉴 > 인물정보 동기화 → 내 캘린더 목록 보기(이름 확인) → 이번 달 수집 → 트리거 설치');
+  if (ppl !== pplM) { ppl.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove()); ppl.protect().setDescription('운영 전용').setWarningOnly(true); }
+  [s, ts].forEach(b => { const def = b.getSheetByName('시트1') || b.getSheetByName('Sheet1'); if (def && b.getSheets().length > 1) b.deleteSheet(def); });
+  if (ts.getId() === s.getId()) s.setActiveSheet(guide);
+  SpreadsheetApp.getUi().alert('설정 완료!' + (ts.getId() !== s.getId() ? ' 팀 탭은 별도 파일(' + ts.getName() + ')에 만들어졌어요.' : '') + '\n다음: 메뉴 > 인물정보 동기화 → 내 캘린더 목록 보기(이름 확인) → 이번 달 수집 → 트리거 설치');
 }
 
 function applyRowFormulas(sh, startRow, n) {
@@ -202,10 +220,18 @@ function applyRowFormulas(sh, startRow, n) {
 function clearTeamTabs() {
   const ui = SpreadsheetApp.getUi();
   if (ui.alert('팀 탭의 데이터와 헤더를 전부 지우고 다시 만듭니다. 계속할까요?', ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
-  TEAM_TABS.forEach(n => { const sh = ss().getSheetByName(n); if (sh) { sh.clear(); sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove()); } });
+  TEAM_TABS.forEach(n => { const sh = teamSS().getSheetByName(n); if (sh) { sh.clear(); sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove()); } });
   setup();
 }
 function getOrCreate(name) { return ss().getSheetByName(name) || ss().insertSheet(name); }
+/** 인물마스터 이름·분류를 팀 파일로 복사 (민감정보 없음) */
+function mirrorPeopleToTeam() {
+  const ts = teamSS(); if (ts.getId() === ss().getId()) return;
+  const src = ss().getSheetByName('인물마스터'); const dst = getOrCreateIn(ts, '인물마스터');
+  const v = src.getLastRow() > 1 ? src.getRange(2, 1, src.getLastRow() - 1, 2).getValues().filter(r => r[0]) : [];
+  if (dst.getLastRow() > 1) dst.getRange(2, 1, dst.getLastRow() - 1, 2).clearContent();
+  if (v.length) dst.getRange(2, 1, v.length, 2).setValues(v);
+}
 function styleHeader(sh, n) {
   sh.getRange(1, 1, 1, n).setBackground('#1f2937').setFontColor('#ffffff').setFontWeight('bold')
     .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
@@ -252,6 +278,7 @@ function syncPeople() {
     ppl.getRange(2, 1, outRows.length, 7).setValues(outRows);
     ppl.getRange(2, 3, outRows.length, 1).setFormula('=IF(B2="","",IF(B2="세금계산서",1.1,IF(B2="삼쩜삼",0.967,1)))');
   }
+  mirrorPeopleToTeam();
   return rows.length;
 }
 
@@ -297,7 +324,7 @@ function prefillFromContracts(ym) {
     date: r[8] ? new Date(r[8]) : null, fee: Number(String(r[9]).replace(/[^\d]/g, '')) || 0, file: r[12] }));
   let n = 0;
   TEAM_TABS.forEach(tab => {
-    const sh = ss().getSheetByName(tab); const k = cols(sh);
+    const sh = teamSS().getSheetByName(tab); const k = cols(sh);
     const last = sh.getLastRow(); if (last < 2) return;
     const v = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
     v.forEach((r, i) => {
@@ -418,7 +445,7 @@ function mergeForTeams(found) {
 
 /** ✔ 없고 단가도 없는 자동 행(해당 월)을 지움 → 재수집 시 깨끗하게 */
 function removeUntouchedRows(tab, ym) {
-  const sh = ss().getSheetByName(tab); const k = cols(sh);
+  const sh = teamSS().getSheetByName(tab); const k = cols(sh);
   const last = sh.getLastRow(); if (last < 2) return;
   const v = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
   for (let i = v.length - 1; i >= 0; i--) {
@@ -431,7 +458,7 @@ function removeUntouchedRows(tab, ym) {
 
 function appendRows(tab, items, ym) {
   if (!items.length) return 0;
-  const sh = ss().getSheetByName(tab); const k = cols(sh);
+  const sh = teamSS().getSheetByName(tab); const k = cols(sh);
   const nCol = Math.max(sh.getLastColumn(), TEAM_HEADERS.length);
   const last = Math.max(sh.getLastRow(), 1);
   const existing = last > 1 ? sh.getRange(2, 1, last - 1, nCol).getValues() : [];
@@ -581,7 +608,7 @@ function buildOutput(ym) {
   const period = Utilities.formatDate(new Date(y, m - 1, 1), TZ, 'MMM-yy');
   const rows = [], warn = [], toAdd = {}, diag = [];
   TEAM_TABS.forEach(tab => {
-    const sh = ss().getSheetByName(tab);
+    const sh = teamSS().getSheetByName(tab);
     if (!sh) { diag.push(tab + ': 탭 없음'); return; }
     const k = cols(sh);
     const v = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues() : [];
@@ -624,7 +651,7 @@ function buildOutput(ym) {
     + (warn.length ? '\n\n⚠ 확인 필요:\n- ' + warn.join('\n- ') : '')
     + (rows.length === 0 ? '\n\n🔍 진단 (대상 월 ' + ym + '):\n' + diag.join('\n') : '');
   const cfg = getSettings();
-  if (cfg.OWNER_EMAIL) MailApp.sendEmail(cfg.OWNER_EMAIL, '[출연료] ' + ym + ' 취합 완료', summary + '\n\n' + ss().getUrl());
+  if (cfg.OWNER_EMAIL) MailApp.sendEmail(cfg.OWNER_EMAIL, '[출연료] ' + ym + ' 취합 완료', summary + '\n\n' + ss().getUrl() + (teamSS().getId() !== ss().getId() ? '\n팀 파일: ' + teamSS().getUrl() : ''));
   try { SpreadsheetApp.getUi().alert(summary); } catch (e) { Logger.log(summary); }
   return rows.length;
 }
@@ -653,9 +680,9 @@ function notifyRemind() { const ym = ymOf(addMonths(new Date(), -1)); try { impo
 
 function notify(kind, ym) {
   const cfg = getSettings();
-  const url = ss().getUrl();
+  const url = teamSS().getUrl();
   const counts = TEAM_TABS.map(tab => {
-    const sh = ss().getSheetByName(tab); const k = cols(sh);
+    const sh = teamSS().getSheetByName(tab); const k = cols(sh);
     const v = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues() : [];
     const mine = v.filter(r => ymCell(r[k.YM - 1]) === ym);
     const todo = mine.filter(r => r[k.CHK - 1] !== true || r[k.UNIT - 1] === '').length;
