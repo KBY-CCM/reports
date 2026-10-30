@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v10 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v12 (2026-10-30)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v10';
+const VERSION = 'v12';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -579,10 +579,14 @@ function buildOutput(ym) {
   const newp = loadNewPeople();
   const [y, m] = ym.split('-').map(Number);
   const period = Utilities.formatDate(new Date(y, m - 1, 1), TZ, 'MMM-yy');
-  const rows = [], warn = [], toAdd = {};
+  const rows = [], warn = [], toAdd = {}, diag = [];
   TEAM_TABS.forEach(tab => {
-    const sh = ss().getSheetByName(tab); const k = cols(sh);
+    const sh = ss().getSheetByName(tab);
+    if (!sh) { diag.push(tab + ': 탭 없음'); return; }
+    const k = cols(sh);
     const v = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues() : [];
+    const r0 = v.find(r => r[k.NAME - 1]);
+    diag.push(tab + ': 행 ' + v.length + ', 열(월=' + k.YM + ',게스트=' + k.NAME + ',✔=' + k.CHK + ',단가=' + k.UNIT + ',출연료=' + k.AMT + ')' + (r0 ? ', 첫행 월=' + JSON.stringify(r0[k.YM - 1]) + '→' + ymCell(r0[k.YM - 1]) + ', ✔=' + JSON.stringify(r0[k.CHK - 1]) + ', 출연료=' + JSON.stringify(r0[k.AMT - 1]) : ', 데이터 없음'));
     v.forEach((r, i) => {
       if (ymCell(r[k.YM - 1]) !== ym || r[k.CHK - 1] !== true) return;
       const name = String(r[k.NAME - 1] || '').trim();
@@ -617,7 +621,8 @@ function buildOutput(ym) {
   const total = rows.reduce((s, r) => s + r[7], 0);
   const summary = ym + ' 취합: ' + rows.length + '행, 지급 합계 ' + Math.abs(total).toLocaleString() + '원'
     + (addRows.length ? '\n인물정보 추가 필요: ' + addRows.length + '명 (취합 탭 오른쪽 블록 복사)' : '')
-    + (warn.length ? '\n\n⚠ 확인 필요:\n- ' + warn.join('\n- ') : '');
+    + (warn.length ? '\n\n⚠ 확인 필요:\n- ' + warn.join('\n- ') : '')
+    + (rows.length === 0 ? '\n\n🔍 진단 (대상 월 ' + ym + '):\n' + diag.join('\n') : '');
   const cfg = getSettings();
   if (cfg.OWNER_EMAIL) MailApp.sendEmail(cfg.OWNER_EMAIL, '[출연료] ' + ym + ' 취합 완료', summary + '\n\n' + ss().getUrl());
   try { SpreadsheetApp.getUi().alert(summary); } catch (e) { Logger.log(summary); }
@@ -699,6 +704,7 @@ function ymOf(d) { return Utilities.formatDate(d, TZ, 'yyyy-MM'); }
 function ymCell(v) {
   if (v instanceof Date) return ymOf(v);
   if (typeof v === 'number' && v > 30000) return ymOf(new Date(Date.UTC(1899, 11, 30) + v * 86400000));
+  if (/^\d{5}$/.test(String(v).trim())) return ymOf(new Date(Date.UTC(1899, 11, 30) + Number(v) * 86400000));
   const m = /^(\d{4})[-./](\d{1,2})/.exec(String(v || '').trim());
   return m ? m[1] + '-' + ('0' + m[2]).slice(-2) : String(v || '').trim();
 }
