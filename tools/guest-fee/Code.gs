@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v9 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v10 (2026-10-30)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v9';
+const VERSION = 'v10';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -164,6 +164,9 @@ function setup() {
     const body = sh.getRange(2, 1, MAX_ROWS, nCol);
     body.setBorder(true, true, true, true, true, true, '#d1d5db', SpreadsheetApp.BorderStyle.SOLID);
     body.setNumberFormat('General');
+    sh.getRange(2, k.YM, MAX_ROWS, 1).setNumberFormat('@');
+    const ymVals = sh.getRange(2, k.YM, MAX_ROWS, 1).getValues();
+    sh.getRange(2, k.YM, MAX_ROWS, 1).setValues(ymVals.map(x => [x[0] === '' ? '' : ymCell(x[0])]));
     ['YM', 'CH', 'DATE', 'CONTENT', 'NVID', 'LINKS', 'UP', 'AMT', 'NEW', 'TYPE'].forEach(c => sh.getRange(2, k[c], MAX_ROWS, 1).setBackground('#e5e7eb'));
     ['NAME', 'CHK', 'BASIS', 'UNIT', 'NOTE', 'MEMO'].forEach(c => sh.getRange(2, k[c], MAX_ROWS, 1).setBackground('#fef9c3'));
     applyRowFormulas(sh, 2, MAX_ROWS);
@@ -298,7 +301,7 @@ function prefillFromContracts(ym) {
     const last = sh.getLastRow(); if (last < 2) return;
     const v = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
     v.forEach((r, i) => {
-      if (String(r[k.YM - 1]) !== ym || r[k.UNIT - 1] !== '' || r[k.BASIS - 1] !== '') return;
+      if (ymCell(r[k.YM - 1]) !== ym || r[k.UNIT - 1] !== '' || r[k.BASIS - 1] !== '') return;
       const name = String(r[k.NAME - 1] || '').replace(/\s*(공식|개인|출연)$/, '').trim(); if (!name) return;
       const d = r[k.DATE - 1] ? new Date(r[k.DATE - 1]) : null;
       const hits = contracts.filter(ct => ct.names.some(nm => nm && (name.indexOf(nm) >= 0 || nm.indexOf(name) >= 0)))
@@ -420,7 +423,7 @@ function removeUntouchedRows(tab, ym) {
   const v = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
   for (let i = v.length - 1; i >= 0; i--) {
     const r = v[i];
-    if (String(r[k.YM - 1]) !== ym) continue;
+    if (ymCell(r[k.YM - 1]) !== ym) continue;
     const touched = r[k.CHK - 1] === true || r[k.UNIT - 1] !== '' || r[k.NOTE - 1] !== '' || r[k.MEMO - 1] !== '' || r[k.BASIS - 1] !== '';
     if (!touched && r[k.CH - 1] !== '') sh.deleteRow(i + 2);
   }
@@ -432,7 +435,7 @@ function appendRows(tab, items, ym) {
   const nCol = Math.max(sh.getLastColumn(), TEAM_HEADERS.length);
   const last = Math.max(sh.getLastRow(), 1);
   const existing = last > 1 ? sh.getRange(2, 1, last - 1, nCol).getValues() : [];
-  const keys = new Set(existing.filter(r => r[k.YM - 1]).map(r => [r[k.YM - 1], r[k.NAME - 1], fmt(r[k.DATE - 1])].join('|')));
+  const keys = new Set(existing.filter(r => r[k.YM - 1]).map(r => [ymCell(r[k.YM - 1]), r[k.NAME - 1], fmt(r[k.DATE - 1])].join('|')));
   const rows = [];
   items.sort((a, b) => (a.date || 0) - (b.date || 0)).forEach(it => {
     const key = [ym, it.name, fmt(it.date)].join('|');
@@ -446,6 +449,7 @@ function appendRows(tab, items, ym) {
   if (!rows.length) return 0;
   const vals = sh.getRange(2, k.YM, MAX_ROWS, 1).getValues();
   let r = 2; for (let i = vals.length - 1; i >= 0; i--) { if (vals[i][0] !== '') { r = i + 3; break; } }
+  sh.getRange(r, k.YM, rows.length, 1).setNumberFormat('@');
   sh.getRange(r, 1, rows.length, nCol).setValues(rows);
   applyRowFormulas(sh, r, rows.length);
   sh.getRange(r, k.LINKS, rows.length, 1).setWrap(true);
@@ -580,7 +584,7 @@ function buildOutput(ym) {
     const sh = ss().getSheetByName(tab); const k = cols(sh);
     const v = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues() : [];
     v.forEach((r, i) => {
-      if (String(r[k.YM - 1]) !== ym || r[k.CHK - 1] !== true) return;
+      if (ymCell(r[k.YM - 1]) !== ym || r[k.CHK - 1] !== true) return;
       const name = String(r[k.NAME - 1] || '').trim();
       const amt = Number(r[k.AMT - 1]) || 0;
       const note = String(r[k.NOTE - 1] || '').trim() || (String(r[k.CONTENT - 1] || '').trim() + (r[k.DATE - 1] ? ' (' + fmt(r[k.DATE - 1]) + ')' : ''));
@@ -648,7 +652,7 @@ function notify(kind, ym) {
   const counts = TEAM_TABS.map(tab => {
     const sh = ss().getSheetByName(tab); const k = cols(sh);
     const v = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues() : [];
-    const mine = v.filter(r => String(r[k.YM - 1]) === ym);
+    const mine = v.filter(r => ymCell(r[k.YM - 1]) === ym);
     const todo = mine.filter(r => r[k.CHK - 1] !== true || r[k.UNIT - 1] === '').length;
     const owner = cfg['담당_' + tab] ? ' @' + cfg['담당_' + tab] : '';
     return tab.replace('입력_', '') + owner + ' ' + mine.length + '건 (미완료 ' + todo + ')';
@@ -691,6 +695,13 @@ function monthlyCollect() {
 
 // ─────────────────────────── 유틸 ───────────────────────────
 function ymOf(d) { return Utilities.formatDate(d, TZ, 'yyyy-MM'); }
+/** 셀의 월 값: 텍스트 '2026-10' / 날짜 / 숫자(시리얼) 모두 'yyyy-MM'로 */
+function ymCell(v) {
+  if (v instanceof Date) return ymOf(v);
+  if (typeof v === 'number' && v > 30000) return ymOf(new Date(Date.UTC(1899, 11, 30) + v * 86400000));
+  const m = /^(\d{4})[-./](\d{1,2})/.exec(String(v || '').trim());
+  return m ? m[1] + '-' + ('0' + m[2]).slice(-2) : String(v || '').trim();
+}
 function addMonths(d, n) { const x = new Date(d); x.setMonth(x.getMonth() + n); return x; }
 function fmt(d) { return d instanceof Date ? Utilities.formatDate(d, TZ, 'yyyy-MM-dd') : (d || ''); }
 function clearMonthRows(sh, ym, col) {
