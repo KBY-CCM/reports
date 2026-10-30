@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v7 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v8 (2026-10-30)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v7';
+const VERSION = 'v8';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -656,8 +656,16 @@ function notify(kind, ym) {
   const text = kind === 'collect'
     ? `📋 *${y}년 ${m}월 출연료 정리* 시작합니다!\n자동 수집한 출연 내역이 팀 탭에 채워져 있어요. 각 팀 탭에서 ✔확인·단가기준·단가·비고 입력 부탁드립니다.\n마감: *${dueMonth}월 1일* (5일 지급)\n· ${counts}\n${url}`
     : `⏰ *${m}월 출연료 입력 마감일*입니다! 미완료 건 오늘 중 입력 부탁드려요.\n· ${counts}\n${url}`;
-  if (cfg.SLACK_WEBHOOK) UrlFetchApp.fetch(cfg.SLACK_WEBHOOK, { method: 'post', contentType: 'application/json', payload: JSON.stringify({ text }) });
-  else Logger.log('SLACK_WEBHOOK 미설정 — 메시지:\n' + text);
+  let result;
+  if (!cfg.SLACK_WEBHOOK) {
+    result = '⚠ 설정 탭 SLACK_WEBHOOK이 비어 있어 슬랙으로 못 보냈어요.\n\n보낼 예정이던 메시지:\n' + text;
+  } else {
+    try {
+      const res = UrlFetchApp.fetch(cfg.SLACK_WEBHOOK, { method: 'post', contentType: 'application/json', payload: JSON.stringify({ text }), muteHttpExceptions: true });
+      result = res.getResponseCode() === 200 ? '슬랙 발송 완료 ✔\n\n' + text : '⚠ 슬랙 응답 ' + res.getResponseCode() + ': ' + res.getContentText() + '\n(웹훅 URL이 맞는지, 채널이 살아있는지 확인)';
+    } catch (e) { result = '⚠ 슬랙 전송 실패: ' + e.message; }
+  }
+  try { SpreadsheetApp.getUi().alert(result); } catch (e) { Logger.log(result); }
   return text;
 }
 
