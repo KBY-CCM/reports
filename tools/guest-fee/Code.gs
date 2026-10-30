@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v13 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v14 (2026-10-30)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v13';
+const VERSION = 'v14';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -79,6 +79,8 @@ function onOpen() {
     .addItem('② 팀에 슬랙 안내 보내기', 'notifyCollect')
     .addItem('③ 취합 만들기 (지난 달)', 'buildOutputLastMonth')
     .addItem('③ 취합 만들기 (이번 달)', 'buildOutputThisMonth')
+    .addItem('④ 월 마감 — 팀 탭 → 아카이브 (지난 달)', 'archiveLastMonth')
+    .addItem('④ 월 마감 — 팀 탭 → 아카이브 (이번 달)', 'archiveThisMonth')
     .addSeparator()
     .addItem('인물정보 동기화 (통합문서→시트)', 'syncPeople')
     .addItem('계약서 추출본 가져오기 (신규인물정보 탭)', 'importNewPeopleMenu')
@@ -168,6 +170,8 @@ function setup() {
   np.setConditionalFormatRules([SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(MISSING).setFontColor('#dc2626').setBold(true).setRanges([np.getRange(2, 1, MAX_ROWS, NEWP_HEADERS.length)]).build()]);
   const out = getOrCreate('취합');
   out.getRange(1, 1, 1, OUT_HEADERS.length).setValues([OUT_HEADERS]); styleHeader(out, OUT_HEADERS.length); out.setColumnWidth(9, 260);
+  const arc = getOrCreate('입력_아카이브');
+  if (!arc.getRange(1, 1).getValue()) { arc.getRange(1, 1, 1, TEAM_HEADERS.length + 2).setValues([['출처 탭', '마감일시'].concat(TEAM_HEADERS)]); styleHeader(arc, TEAM_HEADERS.length + 2); }
 
   TEAM_TABS.forEach(name => {
     const sh = getOrCreateIn(ts, name);
@@ -202,7 +206,7 @@ function setup() {
     const p = sh.protect().setDescription('자동 채움 열 보호'); p.setWarningOnly(true);
     p.setUnprotectedRanges(['NAME', 'CHK', 'BASIS', 'UNIT', 'NOTE', 'MEMO'].map(c => sh.getRange(2, k[c], MAX_ROWS, 1)));
   });
-  ['인물마스터', '자동수집', '취합', '설정', '신규인물정보'].forEach(n => { const sh = s.getSheetByName(n); sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove()); sh.protect().setDescription('운영 전용').setWarningOnly(true); });
+  ['인물마스터', '자동수집', '취합', '설정', '신규인물정보', '입력_아카이브'].forEach(n => { const sh = s.getSheetByName(n); sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove()); sh.protect().setDescription('운영 전용').setWarningOnly(true); });
   if (ppl !== pplM) { ppl.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove()); ppl.protect().setDescription('운영 전용').setWarningOnly(true); }
   [s, ts].forEach(b => { const def = b.getSheetByName('시트1') || b.getSheetByName('Sheet1'); if (def && b.getSheets().length > 1) b.deleteSheet(def); });
   if (ts.getId() === s.getId()) s.setActiveSheet(guide);
@@ -594,6 +598,34 @@ function fetchUploads(handle, start, end) {
 function isoSeconds(iso) {
   const m = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(iso || '');
   return m ? (Number(m[1] || 0) * 3600 + Number(m[2] || 0) * 60 + Number(m[3] || 0)) : 0;
+}
+
+// ─────────────────────────── 월 마감 (팀 탭 → 아카이브) ───────────────────────────
+function archiveThisMonth() { archiveMonth(ymOf(new Date())); }
+function archiveLastMonth() { archiveMonth(ymOf(addMonths(new Date(), -1))); }
+/** 해당 월 행을 팀 탭에서 잘라내 HJ 파일의 입력_아카이브 탭에 붙임 (값으로 저장) */
+function archiveMonth(ym) {
+  const ui = (() => { try { return SpreadsheetApp.getUi(); } catch (e) { return null; } })();
+  if (ui && ui.alert(ym + ' 행을 팀 탭에서 지우고 아카이브로 옮깁니다. 취합은 끝났나요?', ui.ButtonSet.YES_NO) !== ui.Button.YES) return 0;
+  const arc = getOrCreate('입력_아카이브');
+  const stamp = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm');
+  let moved = 0;
+  TEAM_TABS.forEach(tab => {
+    const sh = teamSS().getSheetByName(tab); if (!sh) return;
+    const k = cols(sh); const last = sh.getLastRow(); if (last < 2) return;
+    const nCol = sh.getLastColumn();
+    const v = sh.getRange(2, 1, last - 1, nCol).getValues();
+    const take = [];
+    for (let i = v.length - 1; i >= 0; i--) {
+      if (ymCell(v[i][k.YM - 1]) !== ym || !v[i][k.NAME - 1]) continue;
+      take.unshift([tab, stamp].concat(v[i].map((x, c) => c === k.YM - 1 ? ym : x)));
+      sh.deleteRow(i + 2);
+    }
+    if (take.length) { arc.getRange(arc.getLastRow() + 1, 1, take.length, take[0].length).setValues(take); moved += take.length; }
+  });
+  const msg = ym + ' 마감: ' + moved + '행을 아카이브로 이동. 팀 탭은 비워졌어요.';
+  if (ui) ui.alert(msg); else Logger.log(msg);
+  return moved;
 }
 
 // ─────────────────────────── 취합 ───────────────────────────
