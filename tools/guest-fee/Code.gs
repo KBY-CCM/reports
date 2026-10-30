@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v8 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v9 (2026-10-30)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v8';
+const VERSION = 'v9';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -59,6 +59,8 @@ const DEFAULT_SETTINGS = [
   ['YT_ChimChakMan_Plus', '입력_침투부|desc', '플러스 채널 (침투부 탭으로 통합)'],
   ['YT_chaak챡', '입력_챡|desc|통천,통닭천사,이세화', '챡 채널 (핸들은 실제 값으로) | 제외할 호스트'],
   ['SLACK_WEBHOOK', '', '슬랙 Incoming Webhook URL (비우면 슬랙 알림 생략)'],
+  ['SLACK_MSG_COLLECT', '📋 *{년}년 {월}월 출연료 정리* 시작합니다!\n<@멤버ID1> <@멤버ID2> 각 팀 탭에서 ✔확인·단가기준·단가·비고 입력 부탁드려요.\n마감: *{마감월}월 1일* (5일 지급)\n{현황}\n{링크}', '25일 안내 문구. 자유롭게 수정. 치환어: {년} {월} {마감월} {현황} {링크}. 멘션은 <@멤버ID> 형식(프로필→⋯→멤버 ID 복사)'],
+  ['SLACK_MSG_REMIND', '⏰ *{월}월 출연료 입력 마감일*입니다! <@멤버ID1> <@멤버ID2> 미완료 건 오늘 중 입력 부탁드려요.\n{현황}\n{링크}', '1일 리마인드 문구. 치환어 동일'],
   ['COLLECT_DAY', '25', '자동 수집 + 팀 안내 발송일'],
   ['REMIND_DAY', '1', '마감 리마인드 발송일 (전월분)'],
   ['NEW_GUEST_FORM_URL', '', '신규 게스트 계좌/세금정보 등록 구글폼 URL'],
@@ -653,9 +655,11 @@ function notify(kind, ym) {
   }).join('\n· ');
   const [y, m] = ym.split('-').map(Number);
   const dueMonth = m === 12 ? 1 : m + 1;
-  const text = kind === 'collect'
-    ? `📋 *${y}년 ${m}월 출연료 정리* 시작합니다!\n자동 수집한 출연 내역이 팀 탭에 채워져 있어요. 각 팀 탭에서 ✔확인·단가기준·단가·비고 입력 부탁드립니다.\n마감: *${dueMonth}월 1일* (5일 지급)\n· ${counts}\n${url}`
-    : `⏰ *${m}월 출연료 입력 마감일*입니다! 미완료 건 오늘 중 입력 부탁드려요.\n· ${counts}\n${url}`;
+  const tpl = (kind === 'collect' ? cfg.SLACK_MSG_COLLECT : cfg.SLACK_MSG_REMIND) || (kind === 'collect'
+    ? '📋 *{년}년 {월}월 출연료 정리* 시작합니다! 각 팀 탭에서 ✔확인·단가기준·단가·비고 입력 부탁드려요.\n마감: *{마감월}월 1일* (5일 지급)\n{현황}\n{링크}'
+    : '⏰ *{월}월 출연료 입력 마감일*입니다! 미완료 건 오늘 중 입력 부탁드려요.\n{현황}\n{링크}');
+  const text = tpl.replace(/\\n/g, '\n').replace(/\{년\}/g, y).replace(/\{월\}/g, m).replace(/\{마감월\}/g, dueMonth)
+    .replace(/\{현황\}/g, '· ' + counts).replace(/\{링크\}/g, url);
   let result;
   if (!cfg.SLACK_WEBHOOK) {
     result = '⚠ 설정 탭 SLACK_WEBHOOK이 비어 있어 슬랙으로 못 보냈어요.\n\n보낼 예정이던 메시지:\n' + text;
