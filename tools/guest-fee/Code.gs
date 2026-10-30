@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v6 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v7 (2026-10-30)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v6';
+const VERSION = 'v7';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -42,6 +42,7 @@ const PEOPLE_HEADERS = ['이름(RAW 표기)', '분류', '배수(자동)', '게�
 const NEWP_HEADERS = ['월', '이름', '분류', '필요번호', '본명/예금주', '은행', '계좌번호', '게스트여부', '촬영일', '출연료(계약)', '정산명의', '본명', '계약서파일', '확인필요', '인물마스터 등록(자동)'];
 const MISSING = '모두싸인에서 확인';
 const OUT_HEADERS = ['대분류', '분류', '이름', '구분', '시기', '비용', '추가작업(필요시)', '최종금액(지급액)', '비고', '출처 탭', '신규여부'];
+const OUT_NEWP_HEADERS = ['▶ 통합문서 인물정보에 붙일 행', '이름', '분류', '필요번호', '본명(필요시)', '은행', '계좌번호', '게스트여부-3개월이후삭제'];
 
 const DEFAULT_SETTINGS = [
   ['XLSX_FILE_ID', '14ypyaW04Go3V-ev0ehlhr-bBXL_HBA2f', '★통합 문서1.xlsx 드라이브 파일 ID (인물정보 동기화용)'],
@@ -569,9 +570,10 @@ function buildOutputLastMonth() { buildOutput(ymOf(addMonths(new Date(), -1))); 
 function buildOutput(ym) {
   const out = ss().getSheetByName('취합');
   const ppl = loadPeopleTypes();
+  const newp = loadNewPeople();
   const [y, m] = ym.split('-').map(Number);
   const period = Utilities.formatDate(new Date(y, m - 1, 1), TZ, 'MMM-yy');
-  const rows = [], warn = [];
+  const rows = [], warn = [], toAdd = {};
   TEAM_TABS.forEach(tab => {
     const sh = ss().getSheetByName(tab); const k = cols(sh);
     const v = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues() : [];
@@ -580,27 +582,52 @@ function buildOutput(ym) {
       const name = String(r[k.NAME - 1] || '').trim();
       const amt = Number(r[k.AMT - 1]) || 0;
       const note = String(r[k.NOTE - 1] || '').trim() || (String(r[k.CONTENT - 1] || '').trim() + (r[k.DATE - 1] ? ' (' + fmt(r[k.DATE - 1]) + ')' : ''));
-      const p = ppl[name]; const type = p ? p.type : '';
+      const p = ppl[name];
+      const np = p ? null : findNewPerson(name, newp);
+      const type = p ? p.type : (np ? np.type : '');
       const mult = type === '세금계산서' ? 1.1 : type === '삼쩜삼' ? 0.967 : 1;
+      const flag = p ? '' : np ? '신규(계약서)' : '신규(정보없음)';
       if (!name) warn.push(tab + ' ' + (i + 2) + '행: 게스트명 없음');
       if (!r[k.BASIS - 1]) warn.push(tab + ' ' + (i + 2) + '행 (' + name + '): 단가기준 없음');
       if (!amt && ZERO_BASIS.indexOf(r[k.BASIS - 1]) < 0) warn.push(tab + ' ' + (i + 2) + '행 (' + name + '): 금액 없음');
-      if (!p) warn.push(tab + ' ' + (i + 2) + '행 (' + name + '): 인물마스터에 없음 → 통합문서 인물정보에 추가 필요');
-      if (amt === 0) return; // 거절/0원은 RAW에 안 넣음
-      rows.push(['제작인건비', '출연료', name, type, period, -amt, mult, -Math.round(amt * mult), note, tab, p ? '' : '신규']);
+      if (!p && !np) warn.push(tab + ' ' + (i + 2) + '행 (' + name + '): 인물마스터·신규인물정보 둘 다 없음 → 계약서/계좌 확인 필요');
+      if (!p && np) { toAdd[name] = np; if (np.missing) warn.push(name + ': 계약서 추출본에 빈 항목(' + np.missing + ') → 모두싸인에서 확인'); }
+      if (amt === 0) return;
+      rows.push(['제작인건비', '출연료', name, type, period, -amt, mult, -Math.round(amt * mult), note, tab, flag]);
     });
   });
-  if (out.getLastRow() > 1) out.getRange(2, 1, out.getLastRow() - 1, OUT_HEADERS.length).clearContent();
+  out.clearContents();
+  out.getRange(1, 1, 1, OUT_HEADERS.length).setValues([OUT_HEADERS]); styleHeader(out, OUT_HEADERS.length);
   if (rows.length) {
     out.getRange(2, 1, rows.length, OUT_HEADERS.length).setValues(rows);
     out.getRange(2, 6, rows.length, 1).setNumberFormat('#,##0'); out.getRange(2, 8, rows.length, 1).setNumberFormat('#,##0');
   }
+  // 오른쪽: 통합문서 인물정보에 붙일 신규 행 (M열부터)
+  const c0 = OUT_HEADERS.length + 2;
+  out.getRange(1, c0, 1, OUT_NEWP_HEADERS.length).setValues([OUT_NEWP_HEADERS]).setBackground('#7c2d12').setFontColor('#fff').setFontWeight('bold');
+  const addRows = Object.keys(toAdd).map(n => { const q = toAdd[n]; return ['', n, q.type, q.num, q.payee, q.bank, q.acct, '게스트']; });
+  if (addRows.length) out.getRange(2, c0, addRows.length, OUT_NEWP_HEADERS.length).setValues(addRows);
+  out.setConditionalFormatRules([SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(MISSING).setFontColor('#dc2626').setBold(true).setRanges([out.getRange(2, c0, MAX_ROWS, OUT_NEWP_HEADERS.length)]).build()]);
   const total = rows.reduce((s, r) => s + r[7], 0);
-  const summary = ym + ' 취합: ' + rows.length + '행, 지급 합계 ' + Math.abs(total).toLocaleString() + '원' + (warn.length ? '\n\n⚠ 확인 필요:\n- ' + warn.join('\n- ') : '');
+  const summary = ym + ' 취합: ' + rows.length + '행, 지급 합계 ' + Math.abs(total).toLocaleString() + '원'
+    + (addRows.length ? '\n인물정보 추가 필요: ' + addRows.length + '명 (취합 탭 오른쪽 블록 복사)' : '')
+    + (warn.length ? '\n\n⚠ 확인 필요:\n- ' + warn.join('\n- ') : '');
   const cfg = getSettings();
   if (cfg.OWNER_EMAIL) MailApp.sendEmail(cfg.OWNER_EMAIL, '[출연료] ' + ym + ' 취합 완료', summary + '\n\n' + ss().getUrl());
   try { SpreadsheetApp.getUi().alert(summary); } catch (e) { Logger.log(summary); }
   return rows.length;
+}
+/** 신규인물정보 탭 → {이름: {type,num,payee,bank,acct,missing,names[]}} (최신 행 우선) */
+function loadNewPeople() {
+  const sh = ss().getSheetByName('신규인물정보'); if (!sh) return [];
+  const v = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 14).getValues() : [];
+  return v.filter(r => r[1]).map(r => ({
+    names: String(r[1]).split(/[,&\/]/).map(x => x.trim()).filter(Boolean).concat(r[11] ? [String(r[11]).trim()] : []),
+    type: String(r[2] || ''), num: String(r[3] || ''), payee: String(r[4] || ''), bank: String(r[5] || ''), acct: String(r[6] || ''), missing: String(r[13] || '') }));
+}
+function findNewPerson(name, newp) {
+  const base = name.replace(/\s*(공식|개인|출연)$/, '').trim();
+  return newp.find(q => q.names.some(n => n === base || n === name || base.indexOf(n) >= 0 || n.indexOf(base) >= 0)) || null;
 }
 function loadPeopleTypes() {
   const sh = ss().getSheetByName('인물마스터');
