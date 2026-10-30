@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v5 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v6 (2026-10-30)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v5';
+const VERSION = 'v6';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -611,7 +611,7 @@ function loadPeopleTypes() {
 
 // ─────────────────────────── 알림 ───────────────────────────
 function notifyCollect() { notify('collect', ymOf(new Date())); }
-function notifyRemind() { notify('remind', ymOf(addMonths(new Date(), -1))); }
+function notifyRemind() { const ym = ymOf(addMonths(new Date(), -1)); try { importNewPeople(); prefillFromContracts(ym); } catch (e) { Logger.log(e.message); } notify('remind', ym); }
 
 function notify(kind, ym) {
   const cfg = getSettings();
