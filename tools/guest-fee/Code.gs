@@ -1,5 +1,5 @@
 /**
- * 출연료 월정산 자동화 — 금병영  v17 (2026-10-30)
+ * 출연료 월정산 자동화 — 금병영  v18 (2026-11-06)
  * ---------------------------------------------------------------
  * 단위: (출연일 × 인물) 한 줄. 영상수는 따로 센다. (섭외 IN/OUT 시트 방식)
  * 흐름: 캘린더 + 유튜브 수집 → 팀 탭 선채움 → 팀이 ✔/단가기준/단가 입력
@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------
  */
 
-const VERSION = 'v17';
+const VERSION = 'v18';
 const TZ = 'Asia/Seoul';
 const TEAM_TABS = ['입력_침투부', '입력_깔깔튜브', '입력_챡'];
 const MAX_ROWS = 300;
@@ -52,7 +52,7 @@ const DEFAULT_SETTINGS = [
   ['NEW_PEOPLE_FOLDER_ID', '15IiDgt0rGHzpIAScHF0j31wO9sy3kl-f', '계약서 추출 CSV(신규인물정보_YYYY-MM.csv)가 놓이는 드라이브 폴더 ID'],
   ['CAL_침착맨 생방 일정', '입력_침투부', '캘린더 이름 → 배정 탭 (이름은 메뉴 > 내 캘린더 목록 보기 에서 복사)'],
   ['CAL_NEW채널제작일정', '입력_깔깔튜브', '캘린더 이름 → 배정 탭'],
-  ['CAL_통닭천사 BDC', '입력_챡|통천,통닭천사,이세화', '캘린더 이름 → 배정 탭 | 제외할 호스트 이름(쉼표)'],
+  ['CAL_통닭천사 BDC', '입력_챡|통천,통닭천사,이세화|all', '캘린더 이름 → 배정 탭 | 제외할 호스트(쉼표) | all=키워드 무시하고 모든 일정 후보'],
   ['CAL_KEYWORDS', '녹화,촬영,초대석,특강,합방,출연,방송,BDC,광고', '캘린더 일정 중 이 단어가 들어간 것만 출연 후보로 봄 (쉼표 구분, 비우면 전부)'],
   ['HOST_EXCLUDE', '침착맨,이병건,침투부,김현지', '모든 채널·캘린더에서 항상 제외할 이름 (쉼표)'],
   ['CAL_EXCLUDE', '기획안,회의,연차,피드백,전달,최종본,미팅', '이 단어가 들어간 일정은 제외'],
@@ -370,15 +370,20 @@ function collectMonth(ym) {
     const cp = cfg[k].split('|').map(x => x.trim());
     const tab = cp[0];
     const calExNames = (cp[1] || '').split(',').map(x => x.trim()).filter(Boolean).concat(hostEx);
+    const allEvents = (cp[2] || '').trim() === 'all';   // 3번째 칸 'all' = 키워드 무시, 모든 일정 후보
     const cals = CalendarApp.getCalendarsByName(calName);
     if (!cals.length) { found.push(row(ym, '캘린더:' + calName, '', '(캘린더를 찾지 못함 — 메뉴 "내 캘린더 목록 보기"로 이름 확인)', '', '', '', tab, '오류', 'cal')); return; }
     cals[0].getEvents(start, end).forEach(ev => {
-      const text = ev.getTitle() + ' ' + (ev.getDescription() || '');
-      if (calKw.length && !calKw.some(w => text.indexOf(w) >= 0)) { skipped.calNoMatch++; return; }
+      const title = ev.getTitle();
+      const text = title + ' ' + (ev.getDescription() || '');
+      if (!allEvents && calKw.length && !calKw.some(w => text.indexOf(w) >= 0)) { skipped.calNoMatch++; return; }
       if (calEx.some(w => text.indexOf(w) >= 0)) { skipped.calNoMatch++; return; }
-      const names = extractNames(text, people).filter(n => !calExNames.some(x => n.name.indexOf(x) >= 0 || n.raw.indexOf(x) >= 0));
+      const notHost = n => !calExNames.some(x => (n.name || '').indexOf(x) >= 0 || n.raw.indexOf(x) >= 0);
+      let names = extractNames(text, people).filter(notHost);
+      // 제목의 with/feat/(괄호) 게스트는 인물마스터에 없어도 이름 그대로 후보로
+      extractFromTitle(title, people).filter(notHost).forEach(n => { if (!names.some(o => o.raw === n.raw)) names.push(n); });
       if (!names.length) { skipped.calNoMatch++; return; }
-      names.forEach(n => found.push(row(ym, '캘린더:' + calName, ev.getStartTime(), ev.getTitle(), n.raw, n.name, ev.getId(), tab, '', 'cal')));
+      names.forEach(n => found.push(row(ym, '캘린더:' + calName, ev.getStartTime(), title, n.raw, n.name, ev.getId(), tab, '', 'cal')));
     });
   });
 
